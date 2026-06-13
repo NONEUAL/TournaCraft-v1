@@ -1,0 +1,86 @@
+{
+  "name": "Province Games – Tournament Maker",
+  "short_name": "Province Games",
+  "description": "Offline-first tournament bracket maker for province esports and sports events. Supports Mobile Legends, COD Mobile, Volleyball, Basketball, and Tekken.",
+  "start_url": "/index.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#121420",
+  "theme_color": "#121420",
+  "lang": "en-PH",
+  "dir": "ltr",
+
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+
+  "screenshots": [
+    {
+      "src": "screenshots/dashboard.png",
+      "sizes": "1024x768",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Tournament Dashboard"
+    },
+    {
+      "src": "screenshots/bracket.png",
+      "sizes": "390x844",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Live Bracket View"
+    }
+  ],
+
+  "categories": ["sports", "games", "utilities"],
+
+  "shortcuts": [
+    {
+      "name": "New Tournament",
+      "short_name": "New",
+      "description": "Create a new tournament bracket",
+      "url": "/index.html#create",
+      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "View Bracket",
+      "short_name": "View",
+      "description": "Enter a share code to view a bracket",
+      "url": "/view.html",
+      "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+
+  "prefer_related_applications": false,
+
+  "related_applications": [],
+
+  "protocol_handlers": [],
+
+  "share_target": {
+    "action": "/view.html",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "code",
+      "url": "url"
+    }
+  }
+}
