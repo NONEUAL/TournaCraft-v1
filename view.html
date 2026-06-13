@@ -193,192 +193,268 @@
   <div id="toast-container" aria-live="polite" aria-atomic="false"></div>
 
   <!-- Scripts -->
+  <script src="js/config.js"></script>
   <script src="js/storage.js"></script>
+  <script src="js/bracket/singleElim.js"></script>
   <script src="js/bracket/doubleElim.js"></script>
   <script src="js/bracket/roundRobin.js"></script>
+  <script src="js/bracket/groupsPlayoff.js"></script>
   <script src="js/games/mobileLegends.js"></script>
+  <script src="js/ui/bracketRenderer.js"></script>
+  <script src="js/websocket.js"></script>
   <script>
-    // ================================================================
-    // VIEW.HTML – PUBLIC TOURNAMENT VIEWER
-    // ================================================================
+    /**
+     * view.html — Province Games Public Viewer
+     *
+     * Clean rewrite: all rendering delegated to BracketRenderer,
+     * real-time updates via RealtimeSync (WebSocket), polling fallback.
+     * No duplicate rendering logic from app.js.
+     */
+    'use strict';
 
-    const REFRESH_INTERVAL_MS = 30_000;
-    let currentTournament = null;
-    let refreshTimer = null;
-    let lastUpdated = null;
+    // ── Constants ────────────────────────────────────────────────
+    const POLL_INTERVAL_MS = 30_000;   // fallback polling when WS not connected
 
-    // ── Grab URL param if share code was in the link ─────────────────
+    const GAME_LABELS = {
+      mobile_legends: 'Mobile Legends', cod_mobile: 'COD Mobile',
+      volleyball: 'Volleyball', basketball: 'Basketball', tekken: 'Tekken',
+    };
+    const FORMAT_LABELS = {
+      groups_double_elim: 'Groups → Double Elimination',
+      double_elimination:  'Double Elimination',
+      single_elimination:  'Single Elimination',
+      round_robin:         'Round Robin',
+      swiss:               'Swiss Stage',
+    };
+
+    // ── State ─────────────────────────────────────────────────────
+    let currentTournament  = null;
+    let activePhaseIndex   = 0;
+    let pollTimer          = null;
+    let lastUpdated        = null;
+    let lastUpdatedTimer   = null;
+
+    // ── Boot ──────────────────────────────────────────────────────
     document.addEventListener('DOMContentLoaded', () => {
-      initConnectionStatus();
-      const params = new URLSearchParams(window.location.search);
-      const code = params.get('code');
+      initConnectionBadge();
+      bindEvents();
+
+      // Auto-load if share code is in the URL query string
+      const code = new URLSearchParams(window.location.search).get('code');
       if (code) {
         document.getElementById('share-code-input').value = code.toUpperCase();
-        loadTournamentByCode(code.toUpperCase());
+        loadByCode(code.toUpperCase());
       }
+    });
 
+    // ── Event binding ─────────────────────────────────────────────
+    function bindEvents() {
       document.getElementById('btn-load-tournament').addEventListener('click', () => {
         const code = document.getElementById('share-code-input').value.trim().toUpperCase();
-        loadTournamentByCode(code);
+        loadByCode(code);
       });
 
-      document.getElementById('share-code-input').addEventListener('keydown', (e) => {
+      document.getElementById('share-code-input').addEventListener('keydown', e => {
         if (e.key === 'Enter') document.getElementById('btn-load-tournament').click();
       });
 
       document.getElementById('btn-refresh').addEventListener('click', () => {
-        if (currentTournament) refreshTournament();
+        if (currentTournament) poll();
       });
 
-      document.getElementById('btn-exit-viewer').addEventListener('click', () => {
-        clearInterval(refreshTimer);
-        currentTournament = null;
-        document.getElementById('viewer-bracket-screen').hidden = true;
-        document.getElementById('code-entry-screen').hidden = false;
-      });
-    });
+      document.getElementById('btn-exit-viewer').addEventListener('click', exitViewer);
+    }
 
-    async function loadTournamentByCode(code) {
-      const errMsg = document.getElementById('code-error-msg');
-      errMsg.textContent = '';
+    // ── Load tournament by share code ─────────────────────────────
+    async function loadByCode(code) {
+      const errEl = document.getElementById('code-error-msg');
+      errEl.textContent = '';
+
       if (!code || code.length < 4) {
-        errMsg.textContent = '⚠️ Please enter a valid share code.';
-        errMsg.style.color = '#e07070';
+        errEl.textContent = '⚠️ Please enter a valid share code.';
+        errEl.style.color = '#e07070';
         return;
       }
 
+      const btn = document.getElementById('btn-load-tournament');
+      btn.disabled = true;
+      btn.textContent = 'Loading…';
+
       try {
-        // Try storage (offline-first)
         const tournament = await Storage.getTournamentByCode(code);
         if (!tournament) {
-          errMsg.textContent = '❌ Tournament not found. Check the code and try again.';
-          errMsg.style.color = '#e07070';
+          errEl.textContent = '❌ Tournament not found. Double-check the code and try again.';
+          errEl.style.color = '#e07070';
           return;
         }
-        currentTournament = tournament;
-        showViewerBracket(tournament);
+        openViewer(tournament);
       } catch (err) {
-        errMsg.textContent = '⚠️ Unable to load bracket. Check your connection and try again.';
-        errMsg.style.color = '#e07070';
+        errEl.textContent = '⚠️ Unable to load bracket. Check your connection and try again.';
+        errEl.style.color = '#e07070';
         console.error('[Viewer] Load error:', err);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'View Bracket';
       }
     }
 
-    function showViewerBracket(tournament) {
-      document.getElementById('code-entry-screen').hidden = true;
-      document.getElementById('viewer-bracket-screen').hidden = false;
-      document.getElementById('viewer-t-name').textContent = tournament.name;
-      document.getElementById('viewer-t-meta').textContent =
-        `${GameConfigs[tournament.game]?.label || tournament.game} · ${FormatLabels[tournament.format] || tournament.format}`;
-      lastUpdated = new Date();
-      updateLastUpdatedLabel();
+    // ── Open the viewer for a loaded tournament ───────────────────
+    function openViewer(tournament) {
+      currentTournament = tournament;
+      activePhaseIndex  = 0;
 
-      // Render bracket (read-only mode: no click handlers for score entry)
-      renderViewerBracket(tournament);
+      // Update topbar
+      document.getElementById('code-entry-screen').hidden       = true;
+      document.getElementById('viewer-bracket-screen').hidden   = false;
+      document.getElementById('viewer-t-name').textContent      = tournament.name;
+      document.getElementById('viewer-t-meta').textContent      =
+        `${GAME_LABELS[tournament.game] || tournament.game} · ${FORMAT_LABELS[tournament.format] || tournament.format}`;
 
-      // Start auto-refresh
-      clearInterval(refreshTimer);
-      refreshTimer = setInterval(refreshTournament, REFRESH_INTERVAL_MS);
+      // Build phase tabs using BracketRenderer's phase list
+      buildPhaseTabs(tournament);
+
+      // Render initial phase
+      renderCurrentPhase();
+
+      // Mark updated
+      markUpdated();
+
+      // Start WebSocket subscription (live updates)
+      startLiveSync(tournament);
+
+      // Fallback polling if WS disconnects
+      startPolling();
     }
 
-    async function refreshTournament() {
+    // ── Phase tabs ────────────────────────────────────────────────
+    function buildPhaseTabs(tournament) {
+      const phases = BracketRenderer.getPhaseList(tournament);
+      const tabs   = document.getElementById('viewer-phase-tabs');
+
+      tabs.innerHTML = phases.map((phase, i) =>
+        `<button class="phase-tab${i === 0 ? ' active' : ''}" role="tab" data-index="${i}">
+          ${phase.label}
+        </button>`
+      ).join('');
+
+      tabs.querySelectorAll('.phase-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          tabs.querySelectorAll('.phase-tab').forEach(t => t.classList.remove('active'));
+          tab.classList.add('active');
+          activePhaseIndex = parseInt(tab.dataset.index, 10);
+          renderCurrentPhase();
+        });
+      });
+    }
+
+    // ── Render current phase (read-only, no onMatchClick) ─────────
+    function renderCurrentPhase() {
       if (!currentTournament) return;
+      const content = document.getElementById('viewer-bracket-content');
+      // readOnly=true, no click handler — pure viewer
+      BracketRenderer.renderTournamentPhase(
+        currentTournament, activePhaseIndex, content, true, null
+      );
+    }
+
+    // ── Real-time sync via WebSocket ──────────────────────────────
+    function startLiveSync(tournament) {
+      // Only connect if a WS endpoint is configured in the environment
+      const wsEndpoint = window.WS_ENDPOINT || null;
+      if (!wsEndpoint) return;
+
+      RealtimeSync.onUpdate = (updated) => {
+        if (updated.id !== currentTournament?.id) return;
+        currentTournament = updated;
+        renderCurrentPhase();
+        markUpdated();
+        // Update "Live" badge to green
+        const badge = document.getElementById('viewer-live-badge');
+        if (badge) {
+          badge.querySelector('.live-dot').style.background = '#5a9e7a';
+        }
+      };
+
+      RealtimeSync.onStateChange = (state, STATES) => {
+        const badge    = document.getElementById('viewer-live-badge');
+        const liveText = badge?.querySelector('span:last-child');
+        if (!badge) return;
+        if (state === STATES.CONNECTED) {
+          badge.style.opacity = '1';
+          if (liveText) liveText.textContent = 'Live';
+          document.getElementById('last-updated-info').textContent =
+            '🟢 Connected live — updates stream automatically';
+        } else if (state === STATES.RECONNECTING) {
+          badge.style.opacity = '0.6';
+          if (liveText) liveText.textContent = 'Reconnecting…';
+        } else {
+          badge.style.opacity = '0.4';
+          if (liveText) liveText.textContent = 'Polling';
+        }
+      };
+
+      RealtimeSync.connect(wsEndpoint);
+      RealtimeSync.subscribe(tournament.id);
+    }
+
+    // ── Fallback polling ──────────────────────────────────────────
+    function startPolling() {
+      clearInterval(pollTimer);
+      pollTimer = setInterval(poll, POLL_INTERVAL_MS);
+    }
+
+    async function poll() {
+      if (!currentTournament || RealtimeSync.isConnected()) return;
       try {
         const updated = await Storage.getTournamentByCode(currentTournament.shareCode);
-        if (updated) {
+        if (updated && updated.updatedAt !== currentTournament.updatedAt) {
           currentTournament = updated;
-          renderViewerBracket(updated);
-          lastUpdated = new Date();
-          updateLastUpdatedLabel();
+          renderCurrentPhase();
+          markUpdated();
         }
       } catch (err) {
-        console.warn('[Viewer] Refresh failed silently:', err);
+        console.warn('[Viewer] Poll failed silently:', err);
       }
+    }
+
+    // ── Exit viewer ───────────────────────────────────────────────
+    function exitViewer() {
+      clearInterval(pollTimer);
+      clearTimeout(lastUpdatedTimer);
+      RealtimeSync.disconnect();
+      currentTournament = null;
+      document.getElementById('viewer-bracket-screen').hidden = true;
+      document.getElementById('code-entry-screen').hidden     = false;
+      // Reset active tab for next load
+      activePhaseIndex = 0;
+    }
+
+    // ── Last-updated label ────────────────────────────────────────
+    function markUpdated() {
+      lastUpdated = Date.now();
+      updateLastUpdatedLabel();
     }
 
     function updateLastUpdatedLabel() {
+      clearTimeout(lastUpdatedTimer);
       const el = document.getElementById('last-updated-info');
-      if (!lastUpdated) { el.textContent = ''; return; }
-      const secs = Math.round((Date.now() - lastUpdated.getTime()) / 1000);
-      el.textContent = secs < 10 ? 'Last updated: just now' : `Last updated: ${secs}s ago`;
-      setTimeout(updateLastUpdatedLabel, 10_000);
+      if (!lastUpdated || RealtimeSync.isConnected()) return;
+      const secs = Math.round((Date.now() - lastUpdated) / 1000);
+      el.textContent = secs < 10
+        ? 'Last updated: just now'
+        : `Last updated: ${secs}s ago`;
+      lastUpdatedTimer = setTimeout(updateLastUpdatedLabel, 15_000);
     }
 
-    function renderViewerBracket(tournament) {
-      // Reuse the same rendering helpers from app.js style, but read-only
-      const tabs = document.getElementById('viewer-phase-tabs');
-      const content = document.getElementById('viewer-bracket-content');
-
-      if (tournament.format === 'groups_double_elim') {
-        tabs.innerHTML = buildPhaseTabs(['Group Stage', 'Winners Bracket', 'Losers Bracket', 'Grand Finals']);
-        tabs.querySelectorAll('.phase-tab').forEach((tab, i) => {
-          tab.addEventListener('click', () => {
-            tabs.querySelectorAll('.phase-tab').forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            renderPhaseContent(tournament, i, content, true);
-          });
-        });
-        renderPhaseContent(tournament, 0, content, true);
-      } else if (tournament.format === 'double_elimination') {
-        tabs.innerHTML = buildPhaseTabs(['Winners Bracket', 'Losers Bracket', 'Grand Finals']);
-        tabs.querySelectorAll('.phase-tab').forEach((tab, i) => {
-          tab.addEventListener('click', () => {
-            tabs.querySelectorAll('.phase-tab').forEach(t => t.classList.remove('active'));
-            tab.classList.add('active');
-            renderPhaseContent(tournament, i + 1, content, true);
-          });
-        });
-        renderPhaseContent(tournament, 1, content, true);
-      } else {
-        tabs.innerHTML = '';
-        renderPhaseContent(tournament, 0, content, true);
-      }
-    }
-
-    // These helper functions are shared with app.js; in production,
-    // extract to a shared ui/bracketRenderer.js module.
-    function buildPhaseTabs(labels) {
-      return labels.map((label, i) =>
-        `<button class="phase-tab${i === 0 ? ' active' : ''}" role="tab" data-index="${i}">${label}</button>`
-      ).join('');
-    }
-
-    // renderPhaseContent is defined in app.js and shared via globals.
-    // For the viewer, we defer to the same function with readOnly=true.
-    // This avoids duplication and ensures visual consistency.
-    function renderPhaseContent(tournament, phaseIndex, container, readOnly) {
-      if (typeof window.renderTournamentPhase === 'function') {
-        window.renderTournamentPhase(tournament, phaseIndex, container, readOnly);
-      } else {
-        container.innerHTML = `<p style="text-align:center;padding:48px;color:#B0B0B0">Loading bracket engine…</p>`;
-      }
-    }
-
-    // ── Game & format label maps ─────────────────────────────────────
-    const GameConfigs = {
-      mobile_legends: { label: 'Mobile Legends' },
-      cod_mobile:     { label: 'COD Mobile' },
-      volleyball:     { label: 'Volleyball' },
-      basketball:     { label: 'Basketball' },
-      tekken:         { label: 'Tekken' }
-    };
-    const FormatLabels = {
-      groups_double_elim: 'Groups → Double Elimination',
-      double_elimination: 'Double Elimination',
-      single_elimination: 'Single Elimination',
-      round_robin: 'Round Robin',
-      swiss: 'Swiss Stage'
-    };
-
-    // ── Connection status (duplicated from app.js for standalone use) ─
-    function initConnectionStatus() {
+    // ── Connection badge ──────────────────────────────────────────
+    function initConnectionBadge() {
       const badge = document.getElementById('connection-status');
       function update() {
         const online = navigator.onLine;
         badge.className = `connection-badge ${online ? 'online' : 'offline'}`;
         badge.querySelector('.status-text').textContent = online ? 'Online' : 'Offline';
       }
-      window.addEventListener('online', update);
+      window.addEventListener('online',  update);
       window.addEventListener('offline', update);
       update();
     }
