@@ -336,96 +336,26 @@ const MLTournament = (() => {
   }
 
   // ================================================================
-  // PLAYOFF SEEDING
+  // PLAYOFF SEEDING  (delegates to GroupsPlayoff — single source of truth)
   // ================================================================
 
   /**
-   * After all group stage matches are complete, seed teams into:
-   *   - Winners Bracket: top 2 from each group (8 teams)
-   *   - Losers Bracket:  3rd from each group (4 teams)
+   * Called automatically from updateGroupMatch() when all groups finish.
+   * Delegates entirely to GroupsPlayoff.seedPlayoffBracket() using
+   * 'cross' strategy — avoids same-group R1 rematches in WB.
    *
-   * WB seeding (standard cross-bracket to avoid same-group rematches):
-   *   WB Match 1: A1 vs D2
-   *   WB Match 2: B1 vs C2
-   *   WB Match 3: C1 vs B2
-   *   WB Match 4: D1 vs A2
-   *
-   * LB seeding (group 3rd places):
-   *   LB R1 Match 1: A3 vs B3
-   *   LB R1 Match 2: C3 vs D3
-   * Then LB R1 losers from WB feed into LB R2.
-   *
-   * @param {Object} t — tournament (mutated in place after deep clone)
+   * @param {Object} t — already-cloned tournament, mutated in place
    */
   function seedPlayoffs(t) {
-    // Collect advancement results per group
-    // advancedByGroup[groupName] = { wb: [team1st, team2nd], lb: [team3rd] }
-    const advancedByGroup = {};
-    t.groups.forEach(group => {
-      const wbTeams = group.standings
-        .filter(s => s.advanceTo === 'winnersBracket')
-        .map(s => t.teams.find(tm => tm.id === s.teamId))
-        .filter(Boolean);
-      const lbTeams = group.standings
-        .filter(s => s.advanceTo === 'losersBracket')
-        .map(s => t.teams.find(tm => tm.id === s.teamId))
-        .filter(Boolean);
-      advancedByGroup[group.name] = { wb: wbTeams, lb: lbTeams };
+    if (!window.GroupsPlayoff) {
+      console.error('[ML] GroupsPlayoff not loaded — cannot seed playoffs');
+      return;
+    }
+    GroupsPlayoff.seedPlayoffBracket(t, {
+      strategy:    'cross',
+      advanceToWB: ML_CONFIG.advanceToWB,   // 2
+      advanceToLB: ML_CONFIG.advanceToLB,   // 1
     });
-
-    // FIX #3: look up rounds by .round property, not by hardcoded IDs.
-    // The matches array within each round is what we write team IDs into.
-    // We locate the round by its round number — this survives any ID scheme.
-    const wbR1 = t.winnersBracket.rounds.find(r => r.round === 1);
-    if (wbR1) {
-      // Cross-bracket seeding to avoid same-group rematches immediately:
-      //   Match 1: A1 vs D2,  Match 2: B1 vs C2
-      //   Match 3: C1 vs B2,  Match 4: D1 vs A2
-      const wbPairs = [
-        [ advancedByGroup['A']?.wb[0], advancedByGroup['D']?.wb[1] ],
-        [ advancedByGroup['B']?.wb[0], advancedByGroup['C']?.wb[1] ],
-        [ advancedByGroup['C']?.wb[0], advancedByGroup['B']?.wb[1] ],
-        [ advancedByGroup['D']?.wb[0], advancedByGroup['A']?.wb[1] ],
-      ];
-      wbPairs.forEach(([ team1, team2 ], i) => {
-        const match = wbR1.matches[i];
-        if (!match) return;
-        match.team1Id  = team1?.id  ?? null;
-        match.team2Id  = team2?.id  ?? null;
-        match.phaseKey = 'winnersBracket';   // ensure routing key is set
-        // Mark ready only when both slots are filled
-        match.status   = (team1 && team2) ? 'pending' : 'waiting';
-      });
-    }
-
-    // LB Round 1: group 3rd places play each other.
-    // LB Round 2 drop-in slots will receive WB R1 losers automatically
-    // when the first WB matches are completed (via DoubleElimBracket.updateMatch).
-    const lbR1 = t.losersBracket.rounds.find(r => r.round === 1);
-    if (lbR1) {
-      const lbPairs = [
-        [ advancedByGroup['A']?.lb[0], advancedByGroup['B']?.lb[0] ],
-        [ advancedByGroup['C']?.lb[0], advancedByGroup['D']?.lb[0] ],
-      ];
-      lbPairs.forEach(([ team1, team2 ], i) => {
-        const match = lbR1.matches[i];
-        if (!match) return;
-        match.team1Id  = team1?.id ?? null;
-        match.team2Id  = team2?.id ?? null;
-        match.phaseKey = 'losersBracket';
-        match.status   = (team1 && team2) ? 'pending' : 'waiting';
-      });
-    }
-
-    // Ensure all WB/LB matches have the correct phaseKey stamped for routing
-    t.winnersBracket.rounds.forEach(r =>
-      r.matches.forEach(m => { m.phaseKey = 'winnersBracket'; })
-    );
-    t.losersBracket.rounds.forEach(r =>
-      r.matches.forEach(m => { m.phaseKey = 'losersBracket'; })
-    );
-
-    t.phase = 'playoffs';
   }
 
   // ================================================================
