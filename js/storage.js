@@ -32,7 +32,8 @@ const Storage = (() => {
   const STORE_NAME   = 'tournaments';
   const LS_KEY       = 'pg_tournaments';
   const SYNC_KEY     = 'pg_sync_queue';
-  const CLOUD_ENDPOINT = null; // Set to your API URL when deploying, e.g. 'https://api.example.com'
+  // Read from js/config.js — set window.CLOUD_ENDPOINT there, not here
+  const CLOUD_ENDPOINT = window.CLOUD_ENDPOINT || null;
 
   // ── IndexedDB Instance ─────────────────────────────────────────
   let _db = null;

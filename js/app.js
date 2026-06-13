@@ -1,10 +1,14 @@
 /**
  * app.js — Province Games Tournament Maker
- * Main application controller. Manages views, form flow,
- * bracket rendering, and match score updates.
+ * Application controller: views, form flow, score modal, share.
+ * Rendering is fully delegated to js/ui/bracketRenderer.js.
+ * Bracket logic lives in js/bracket/*.js
+ * Game rules live in js/games/*.js
  *
- * Depends on: storage.js, bracket/doubleElim.js,
- *             bracket/roundRobin.js, games/mobileLegends.js
+ * Depends on (load order matters):
+ *   storage.js → singleElim.js → doubleElim.js → roundRobin.js
+ *   → groupsPlayoff.js → mobileLegends.js → bracketRenderer.js
+ *   → websocket.js → app.js
  */
 
 'use strict';
@@ -609,25 +613,26 @@ function buildPhaseTabs(tournament) {
 }
 
 function getPhaseList(tournament) {
-  switch (tournament.format) {
-    case 'groups_double_elim':
-      return [
-        { key: 'groups',        label: 'Group Stage' },
-        { key: 'winnersBracket', label: 'Winners Bracket' },
-        { key: 'losersBracket',  label: 'Losers Bracket' },
-        { key: 'grandFinals',    label: 'Grand Finals' },
-      ];
-    case 'double_elimination':
-      return [
-        { key: 'winnersBracket', label: 'Winners Bracket' },
-        { key: 'losersBracket',  label: 'Losers Bracket' },
-        { key: 'grandFinals',    label: 'Grand Finals' },
-      ];
-    case 'round_robin':
-      return [{ key: 'roundRobin', label: 'Round Robin' }];
-    default:
-      return [{ key: 'singleElim', label: 'Bracket' }];
+  // Delegate to BracketRenderer — single source of truth for phase definitions
+  if (window.BracketRenderer) return BracketRenderer.getPhaseList(tournament);
+  // Minimal fallback if renderer not loaded yet
+  if (tournament.format === 'groups_double_elim') {
+    return [
+      { key: 'groups',         label: 'Group Stage'     },
+      { key: 'winnersBracket', label: 'Winners Bracket' },
+      { key: 'losersBracket',  label: 'Losers Bracket'  },
+      { key: 'grandFinals',    label: 'Grand Finals'    },
+    ];
   }
+  if (tournament.format === 'double_elimination') {
+    return [
+      { key: 'winnersBracket', label: 'Winners Bracket' },
+      { key: 'losersBracket',  label: 'Losers Bracket'  },
+      { key: 'grandFinals',    label: 'Grand Finals'    },
+    ];
+  }
+  if (tournament.format === 'round_robin') return [{ key: 'roundRobin', label: 'Round Robin' }];
+  return [{ key: 'singleElim', label: 'Bracket' }];
 }
 
 function renderCurrentPhase() {
@@ -657,254 +662,6 @@ window.renderTournamentPhase = function(tournament, phaseIndex, container, readO
     container.innerHTML = '<p class="loading-overlay">Bracket renderer not loaded. Refresh the page.</p>';
   }
 };
-
-// ── Group Stage Rendering ────────────────────────────────────────
-
-function renderGroupStage(tournament, container, readOnly) {
-  if (!tournament.groups) { container.innerHTML = '<p class="loading-overlay">No group data.</p>'; return; }
-  container.innerHTML = `<div class="groups-layout" id="groups-layout"></div>`;
-  const layout = container.querySelector('.groups-layout');
-
-  tournament.groups.forEach(group => {
-    const block = document.createElement('div');
-    block.className = 'group-block';
-    block.innerHTML = `
-      <div class="group-block-header">
-        <span class="group-name">Group ${sanitize(group.name)}</span>
-        <span class="group-subtitle">${group.standings?.filter(s => s.advanced).length || 0} advance</span>
-      </div>
-      ${renderGroupStandingsTable(group, tournament.teams)}
-      <div class="group-matches">
-        ${(group.matches || []).map(m => renderGroupMatchRow(m, tournament.teams, readOnly)).join('')}
-      </div>`;
-    layout.appendChild(block);
-  });
-
-  if (!readOnly) {
-    // FIX #1: use event delegation so groupId is always read at click-time
-    // from the element, not captured in a potentially-stale render closure.
-    container.addEventListener('click', function handleGroupClick(e) {
-      const row = e.target.closest('.group-match-row');
-      if (!row || row.classList.contains('completed')) return;
-      const matchId = row.dataset.matchId;
-      const groupId = row.dataset.groupId;
-      if (!matchId || !groupId) return;
-      openScoreModal(
-        { matchId, groupId, phaseKey: 'groups' },
-        appState.activeTournament   // always use latest state
-      );
-    });
-  }
-}
-
-function renderGroupStandingsTable(group, teams) {
-  const standings = group.standings || [];
-  const rows = standings.map((s, i) => {
-    const team = teams.find(t => t.id === s.teamId);
-    const rankClass = `rank-${i + 1}`;
-    const advanceBadge = i < 2 ? '→ WB' : i === 2 ? '→ LB' : '✗';
-    const advanceColor = i < 2 ? 'var(--c-accent)' : i === 2 ? '#c8a840' : 'var(--c-text-muted)';
-    return `<tr class="${rankClass}">
-      <td><span class="team-rank-indicator">${i + 1}</span>${sanitize(team?.name || 'TBD')}</td>
-      <td style="text-align:center">${s.wins ?? 0}</td>
-      <td style="text-align:center">${s.losses ?? 0}</td>
-      <td style="text-align:center">${s.gameDiff ?? 0}</td>
-      <td style="text-align:right;font-size:11px;font-weight:700;color:${advanceColor}">${advanceBadge}</td>
-    </tr>`;
-  }).join('');
-  return `<table class="group-standings">
-    <thead><tr>
-      <th>Team</th><th>W</th><th>L</th><th>Diff</th><th></th>
-    </tr></thead>
-    <tbody>${rows}</tbody>
-  </table>`;
-}
-
-function renderGroupMatchRow(match, teams, readOnly) {
-  const t1 = teams.find(t => t.id === match.team1Id);
-  const t2 = teams.find(t => t.id === match.team2Id);
-  const done = match.status === 'completed';
-  const scoreHtml = done
-    ? `<span class="match-score-inline">${match.score1}–${match.score2}</span>`
-    : `<span class="match-score-inline pending">vs</span>`;
-  return `<div class="group-match-row${done ? ' completed' : ''}"
-    data-match-id="${sanitize(match.id)}"
-    data-group-id="${sanitize(match.groupId)}"
-    ${readOnly ? '' : 'role="button" tabindex="0"'}>
-    <div class="match-teams-inline">
-      <span class="match-team-inline">${sanitize(t1?.name || 'TBD')}</span>
-      <span class="match-vs">vs</span>
-      <span class="match-team-inline">${sanitize(t2?.name || 'TBD')}</span>
-    </div>
-    ${scoreHtml}
-    <span style="font-size:11px;color:var(--c-text-muted);margin-left:4px">R${match.round}</span>
-  </div>`;
-}
-
-// ── Elimination Bracket Rendering ────────────────────────────────
-
-function renderEliminationBracket(bracket, label, container, readOnly, tournament) {
-  if (!bracket || !bracket.rounds || bracket.rounds.length === 0) {
-    container.innerHTML = `<p class="loading-overlay text-muted" style="padding:60px 24px;width:100%">
-      ${label} bracket hasn't started yet.<br>Complete the group stage first.</p>`;
-    return;
-  }
-
-  const wrap = document.createElement('div');
-  wrap.style.display = 'inline-flex';
-  wrap.style.gap = '4px';
-  wrap.style.minWidth = '100%';
-  container.innerHTML = '';
-  container.appendChild(wrap);
-
-  bracket.rounds.forEach((round, ri) => {
-    // Connector lines between rounds (skip before first column)
-    if (ri > 0) {
-      const connector = buildRoundConnector(
-        bracket.rounds[ri - 1].matches.length,
-        round.matches.length
-      );
-      wrap.appendChild(connector);
-    }
-
-    const col = document.createElement('div');
-    col.className = 'bracket-round-col';
-    col.innerHTML = `<div class="round-header">
-      ${round.label || (ri === bracket.rounds.length - 1 ? label + ' Final' : `Round ${ri + 1}`)}
-      <br><span style="font-size:10px;font-weight:400">BO${round.bestOf || 3}</span>
-    </div>`;
-
-    const matchesWrap = document.createElement('div');
-    matchesWrap.className = 'round-matches';
-    round.matches.forEach(match => {
-      const card = buildMatchCard(match, tournament?.teams || [], readOnly);
-      matchesWrap.appendChild(card);
-    });
-    col.appendChild(matchesWrap);
-    wrap.appendChild(col);
-  });
-}
-
-function renderGrandFinals(tournament, container, readOnly) {
-  container.innerHTML = '';
-  const gf = tournament.grandFinals;
-  if (!gf) {
-    container.innerHTML = `<p class="loading-overlay text-muted" style="padding:60px 24px">Grand Finals hasn't started yet.</p>`;
-    return;
-  }
-
-  const wrap = document.createElement('div');
-  wrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:24px;padding:24px;width:100%';
-  container.appendChild(wrap);
-
-  const info = document.createElement('div');
-  info.innerHTML = `<h2 style="text-align:center;margin-bottom:4px">🏆 Grand Finals</h2>
-    <p style="text-align:center;font-size:13px">
-      Best of ${gf.bestOf} · 
-      ${gf.bracketReset ? '<span style="color:var(--c-accent)">Bracket Reset Required</span>' : 'Single series'}
-    </p>`;
-  wrap.appendChild(info);
-
-  // Series 1
-  if (gf.series1) {
-    const s1Wrap = document.createElement('div');
-    s1Wrap.innerHTML = '<div class="bracket-section-label" style="text-align:center;margin-bottom:12px">Series 1</div>';
-    const card = buildMatchCard({ ...gf.series1, isFinals: true }, tournament.teams, readOnly);
-    card.classList.add('grand-finals');
-    const lbl = document.createElement('div');
-    lbl.className = 'match-label';
-    lbl.textContent = 'Finals';
-    card.appendChild(lbl);
-    card.style.width = '260px';
-    s1Wrap.appendChild(card);
-    wrap.appendChild(s1Wrap);
-  }
-
-  // Bracket reset (Series 2) if applicable
-  if (gf.bracketReset && gf.series2) {
-    const divider = document.createElement('div');
-    divider.className = 'bracket-divider';
-    divider.textContent = '⚡ Bracket Reset — Series 2';
-    wrap.appendChild(divider);
-
-    const s2Wrap = document.createElement('div');
-    const card2 = buildMatchCard({ ...gf.series2, isFinals: true }, tournament.teams, readOnly);
-    card2.classList.add('grand-finals');
-    card2.style.width = '260px';
-    s2Wrap.appendChild(card2);
-    wrap.appendChild(s2Wrap);
-  }
-}
-
-function renderRoundRobinPhase(tournament, container, readOnly) {
-  container.innerHTML = '';
-  const rr = tournament.roundRobin;
-  if (!rr) { container.innerHTML = '<p class="loading-overlay">No round robin data.</p>'; return; }
-
-  const layout = document.createElement('div');
-  layout.className = 'groups-layout';
-  layout.style.cssText = 'width:100%;grid-template-columns:1fr';
-
-  // Standings
-  const block = document.createElement('div');
-  block.className = 'group-block';
-  block.innerHTML = `
-    <div class="group-block-header">
-      <span class="group-name">Round Robin Standings</span>
-    </div>
-    ${renderGroupStandingsTable({ standings: rr.standings }, tournament.teams)}
-    <div class="group-matches">
-      ${(rr.matches || []).map(m => renderGroupMatchRow(m, tournament.teams, readOnly)).join('')}
-    </div>`;
-  layout.appendChild(block);
-  container.appendChild(layout);
-
-  if (!readOnly) {
-    container.querySelectorAll('.group-match-row:not(.completed)').forEach(row => {
-      row.addEventListener('click', () =>
-        openScoreModal({ matchId: row.dataset.matchId, phaseKey: 'roundRobin' }, tournament));
-    });
-  }
-}
-
-/** Build an individual match card DOM element */
-function buildMatchCard(match, teams, readOnly) {
-  const t1 = match.team1Id ? teams.find(t => t.id === match.team1Id) : null;
-  const t2 = match.team2Id ? teams.find(t => t.id === match.team2Id) : null;
-
-  const isBye = match.isBye;
-  const isTBD = !t1 && !t2;
-  const isCompleted = match.status === 'completed';
-
-  const card = document.createElement('div');
-  card.className = `match-card${isBye ? ' bye' : ''}${isTBD ? ' tbd' : ''}`;
-  card.dataset.matchId = match.id;
-
-  const p1Class = isCompleted && match.winnerId === match.team1Id ? 'winner' : isCompleted ? 'loser' : '';
-  const p2Class = isCompleted && match.winnerId === match.team2Id ? 'winner' : isCompleted ? 'loser' : '';
-
-  const score1 = isCompleted ? `<span class="participant-score">${match.score1 ?? ''}</span>` : '';
-  const score2 = isCompleted ? `<span class="participant-score">${match.score2 ?? ''}</span>` : '';
-
-  card.innerHTML = `
-    <div class="match-participant ${p1Class}${!t1 ? ' empty' : ''}">
-      <span class="participant-seed">${t1?.seed ?? ''}</span>
-      <span class="participant-name">${sanitize(t1?.name || (isBye ? 'BYE' : 'TBD'))}</span>
-      ${score1}
-    </div>
-    <div class="match-participant ${p2Class}${!t2 ? ' empty' : ''}">
-      <span class="participant-seed">${t2?.seed ?? ''}</span>
-      <span class="participant-name">${sanitize(t2?.name || (isBye ? '—' : 'TBD'))}</span>
-      ${score2}
-    </div>`;
-
-  if (!readOnly && t1 && t2 && !isBye) {
-    card.addEventListener('click', () =>
-      openScoreModal({ matchId: match.id, phaseKey: match.phaseKey || 'bracket' },
-        appState.activeTournament));
-  }
-  return card;
-}
 
 // ================================================================
 // SCORE MODAL
