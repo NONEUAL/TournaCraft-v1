@@ -17,7 +17,7 @@
 
 'use strict';
 
-const CACHE_VERSION   = 'province-games-v1';
+const CACHE_VERSION   = 'province-games-v3';
 const OFFLINE_URL     = '/offline.html';
 
 // ── Assets to pre-cache on install ────────────────────────────
@@ -30,9 +30,14 @@ const PRECACHE_ASSETS = [
   '/css/style.css',
   '/js/app.js',
   '/js/storage.js',
+  '/js/bracket/singleElim.js',
   '/js/bracket/doubleElim.js',
   '/js/bracket/roundRobin.js',
+  '/js/bracket/groupsPlayoff.js',
+  '/js/config.js',
   '/js/games/mobileLegends.js',
+  '/js/ui/bracketRenderer.js',
+  '/js/websocket.js',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
 ];

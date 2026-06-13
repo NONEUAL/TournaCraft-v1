@@ -157,6 +157,7 @@ const DOM = {
 
 document.addEventListener('DOMContentLoaded', async () => {
   initConnectionMonitor();
+  initInstallPrompt();
   bindNavigationEvents();
   bindCreateFormEvents();
   bindBracketEvents();
@@ -533,9 +534,11 @@ async function generateTournament() {
       tournament = DoubleElimBracket.createTournament(d, teams);
     } else if (d.format === 'round_robin') {
       tournament = RoundRobinBracket.createTournament(d, teams);
+    } else if (d.format === 'single_elimination') {
+      tournament = SingleElimBracket.createTournament(d, teams);
     } else {
-      // Single elimination / swiss — use double elim as base for now
-      tournament = DoubleElimBracket.createTournament(d, teams);
+      // Swiss and other future formats — fall back to single elimination
+      tournament = SingleElimBracket.createTournament(d, teams);
     }
 
     await Storage.saveTournament(tournament);
@@ -568,6 +571,18 @@ async function openBracket(id) {
 
     // Store for print
     document.querySelector('.bracket-topbar')?.setAttribute('data-tournament-name', tournament.name);
+
+    // Subscribe to live updates for this tournament
+    if (window.RealtimeSync) {
+      RealtimeSync.subscribe(tournament.id);
+      // When a live update arrives, refresh the bracket view
+      RealtimeSync.onUpdate = (updated) => {
+        if (updated.id === appState.activeTournamentId) {
+          appState.activeTournament = updated;
+          renderCurrentPhase();
+        }
+      };
+    }
 
     buildPhaseTabs(tournament);
     renderCurrentPhase();
@@ -624,36 +639,22 @@ function renderCurrentPhase() {
 
 /**
  * Render a tournament phase into `container`.
- * Exposed as global so view.html can call it too.
- * @param {Object}  tournament
- * @param {number}  phaseIndex
- * @param {Element} container
- * @param {boolean} readOnly   — disables match-click when true
+ * Delegates to BracketRenderer (js/ui/bracketRenderer.js) if loaded,
+ * with the score-modal click handler wired in for admin mode.
+ * Also exposed as window.renderTournamentPhase so view.html can call it.
  */
 window.renderTournamentPhase = function(tournament, phaseIndex, container, readOnly) {
-  const phases = getPhaseList(tournament);
-  const phase  = phases[phaseIndex];
-  if (!phase) { container.innerHTML = ''; return; }
-
-  switch (phase.key) {
-    case 'groups':
-      renderGroupStage(tournament, container, readOnly);
-      break;
-    case 'winnersBracket':
-      renderEliminationBracket(tournament.winnersBracket, 'Winners', container, readOnly, tournament);
-      break;
-    case 'losersBracket':
-      renderEliminationBracket(tournament.losersBracket, 'Losers', container, readOnly, tournament);
-      break;
-    case 'grandFinals':
-      renderGrandFinals(tournament, container, readOnly);
-      break;
-    case 'roundRobin':
-      renderRoundRobinPhase(tournament, container, readOnly);
-      break;
-    default:
-      renderEliminationBracket(tournament.winnersBracket || tournament.bracket,
-        'Bracket', container, readOnly, tournament);
+  if (window.BracketRenderer) {
+    // Use extracted renderer; pass click handler only in admin (non-readOnly) mode
+    const clickHandler = readOnly ? null : (matchRef) => {
+      openScoreModal(matchRef, appState.activeTournament);
+    };
+    BracketRenderer.renderTournamentPhase(
+      tournament, phaseIndex, container, readOnly, clickHandler
+    );
+  } else {
+    // Inline fallback (should not happen if scripts load correctly)
+    container.innerHTML = '<p class="loading-overlay">Bracket renderer not loaded. Refresh the page.</p>';
   }
 };
 
@@ -680,12 +681,18 @@ function renderGroupStage(tournament, container, readOnly) {
   });
 
   if (!readOnly) {
-    container.querySelectorAll('.group-match-row:not(.completed)').forEach(row => {
-      row.addEventListener('click', () => {
-        const matchId = row.dataset.matchId;
-        const groupId = row.dataset.groupId;
-        openScoreModal({ matchId, groupId, phaseKey: 'groups' }, tournament);
-      });
+    // FIX #1: use event delegation so groupId is always read at click-time
+    // from the element, not captured in a potentially-stale render closure.
+    container.addEventListener('click', function handleGroupClick(e) {
+      const row = e.target.closest('.group-match-row');
+      if (!row || row.classList.contains('completed')) return;
+      const matchId = row.dataset.matchId;
+      const groupId = row.dataset.groupId;
+      if (!matchId || !groupId) return;
+      openScoreModal(
+        { matchId, groupId, phaseKey: 'groups' },
+        appState.activeTournament   // always use latest state
+      );
     });
   }
 }
@@ -751,6 +758,15 @@ function renderEliminationBracket(bracket, label, container, readOnly, tournamen
   container.appendChild(wrap);
 
   bracket.rounds.forEach((round, ri) => {
+    // Connector lines between rounds (skip before first column)
+    if (ri > 0) {
+      const connector = buildRoundConnector(
+        bracket.rounds[ri - 1].matches.length,
+        round.matches.length
+      );
+      wrap.appendChild(connector);
+    }
+
     const col = document.createElement('div');
     col.className = 'bracket-round-col';
     col.innerHTML = `<div class="round-header">
@@ -974,17 +990,18 @@ function bindModalEvents() {
   $('modal-cancel')?.addEventListener('click', closeScoreModal);
   DOM.scoreModal?.querySelector('.modal-backdrop')?.addEventListener('click', closeScoreModal);
 
-  // Score increment buttons
-  document.querySelectorAll('.score-inc').forEach((btn, i) => {
+  // Score increment/decrement buttons — use closest() to find sibling input,
+  // avoiding fragile global index assumptions.
+  DOM.scoreModal.querySelectorAll('.score-inc').forEach(btn => {
     btn.addEventListener('click', () => {
-      const inp = i === 0 ? DOM.modalScore1 : DOM.modalScore2;
-      inp.value = Math.min(99, parseInt(inp.value, 10) + 1);
+      const inp = btn.closest('.score-controls').querySelector('.score-input');
+      if (inp) inp.value = Math.min(99, parseInt(inp.value, 10) + 1);
     });
   });
-  document.querySelectorAll('.score-dec').forEach((btn, i) => {
+  DOM.scoreModal.querySelectorAll('.score-dec').forEach(btn => {
     btn.addEventListener('click', () => {
-      const inp = i === 0 ? DOM.modalScore1 : DOM.modalScore2;
-      inp.value = Math.max(0, parseInt(inp.value, 10) - 1);
+      const inp = btn.closest('.score-controls').querySelector('.score-input');
+      if (inp) inp.value = Math.max(0, parseInt(inp.value, 10) - 1);
     });
   });
 
@@ -1015,28 +1032,55 @@ function closeScoreModal() {
 async function confirmMatchResult() {
   const s1 = parseInt(DOM.modalScore1.value, 10) || 0;
   const s2 = parseInt(DOM.modalScore2.value, 10) || 0;
-  if (s1 === s2) { showToast('Scores must differ — there must be a winner.', 'error'); return; }
 
-  const ref   = appState.pendingMatchEdit;
-  const match = ref.match;
+  const ref        = appState.pendingMatchEdit;
+  const match      = ref.match;
   const tournament = appState.activeTournament;
+  const bestOf     = match.bestOf || GAME_CONFIGS[tournament.game]?.defaultBO || 3;
+
+  // FIX #9: validate BO rules before saving
+  // Use game-specific validator if available, otherwise use generic check
+  let validation = { valid: true, message: '' };
+  if (tournament.game === 'mobile_legends' && typeof MLTournament !== 'undefined') {
+    validation = MLTournament.validateScore(s1, s2, bestOf);
+  } else {
+    if (s1 === s2)  validation = { valid: false, message: 'Scores must differ — there must be a winner.' };
+    else if (s1 < 0 || s2 < 0) validation = { valid: false, message: 'Scores cannot be negative.' };
+  }
+  if (!validation.valid) { showToast(validation.message, 'error'); return; }
 
   const winnerId = s1 > s2 ? match.team1Id : match.team2Id;
 
   try {
     let updatedTournament;
-    if (tournament.format === 'groups_double_elim' && ref.phaseKey === 'groups') {
-      updatedTournament = MLTournament.updateGroupMatch(tournament, ref.groupId, ref.matchId, s1, s2, winnerId);
-    } else if (tournament.format === 'double_elimination' || ref.phaseKey === 'winnersBracket' || ref.phaseKey === 'losersBracket') {
-      updatedTournament = DoubleElimBracket.updateMatch(tournament, ref.matchId, s1, s2, winnerId);
-    } else if (tournament.format === 'round_robin') {
+
+    // Route to the correct update function based on phase and format
+    if (ref.phaseKey === 'groups') {
+      // Group stage match — always goes through ML (or generic) group handler
+      if (typeof MLTournament !== 'undefined' && tournament.format === 'groups_double_elim') {
+        updatedTournament = MLTournament.updateGroupMatch(
+          tournament, ref.groupId, ref.matchId, s1, s2, winnerId
+        );
+      } else {
+        updatedTournament = RoundRobinBracket.updateMatch(tournament, ref.matchId, s1, s2, winnerId);
+      }
+    } else if (ref.phaseKey === 'roundRobin') {
       updatedTournament = RoundRobinBracket.updateMatch(tournament, ref.matchId, s1, s2, winnerId);
+    } else if (tournament.format === 'single_elimination') {
+      updatedTournament = SingleElimBracket.updateMatch(tournament, ref.matchId, s1, s2, winnerId);
     } else {
+      // winnersBracket, losersBracket, grandFinals — double elimination engine
       updatedTournament = DoubleElimBracket.updateMatch(tournament, ref.matchId, s1, s2, winnerId);
     }
 
     await Storage.saveTournament(updatedTournament);
     appState.activeTournament = updatedTournament;
+
+    // Broadcast to live viewers if WebSocket is connected
+    if (window.RealtimeSync?.isConnected()) {
+      RealtimeSync.broadcast(updatedTournament);
+    }
+
     closeScoreModal();
     renderCurrentPhase();
     showToast('Result saved! ✓', 'success');
@@ -1126,6 +1170,142 @@ function sanitize(str) {
     .replace(/>/g,  '&gt;')
     .replace(/"/g,  '&quot;')
     .replace(/'/g,  '&#x27;');
+}
+
+// ================================================================
+// BRACKET CONNECTOR LINES (Bug #8 fix)
+// ================================================================
+
+/**
+ * Build an SVG connector column between two bracket rounds.
+ * Draws horizontal + vertical lines linking each pair of matches
+ * in the previous round to their combined match in the next round.
+ *
+ * @param {number} prevCount  — number of matches in the left round
+ * @param {number} nextCount  — number of matches in the right round
+ * @returns {HTMLElement} a div containing an SVG
+ */
+function buildRoundConnector(prevCount, nextCount) {
+  const wrap = document.createElement('div');
+  wrap.className = 'bracket-connector-col';
+  wrap.style.cssText = 'display:flex;align-items:stretch;width:28px;flex-shrink:0;';
+
+  const MATCH_H   = 88;   // approximate px height of one match card + gap
+  const HALF_PREV = MATCH_H / 2;
+  const totalH    = Math.max(prevCount, nextCount) * MATCH_H;
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', '28');
+  svg.setAttribute('height', String(totalH));
+  svg.setAttribute('viewBox', `0 0 28 ${totalH}`);
+  svg.style.overflow = 'visible';
+
+  const ratio = prevCount / nextCount;   // usually 2:1
+
+  for (let ni = 0; ni < nextCount; ni++) {
+    // Two prev matches feed into one next match
+    const pi1 = ni * ratio;
+    const pi2 = pi1 + ratio - 1;
+
+    const y1 = (pi1 + 0.5) * MATCH_H;  // centre of first prev match
+    const y2 = (pi2 + 0.5) * MATCH_H;  // centre of second prev match
+    const yMid = (y1 + y2) / 2;         // centre of next match
+
+    // Horizontal stub from left edge to midpoint
+    const line1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    line1.setAttribute('d', `M0,${y1} H14 V${yMid} H28`);
+    line1.setAttribute('stroke', '#403F4C');
+    line1.setAttribute('stroke-width', '1.5');
+    line1.setAttribute('fill', 'none');
+
+    const line2 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    line2.setAttribute('d', `M0,${y2} H14`);
+    line2.setAttribute('stroke', '#403F4C');
+    line2.setAttribute('stroke-width', '1.5');
+    line2.setAttribute('fill', 'none');
+
+    svg.appendChild(line1);
+    svg.appendChild(line2);
+  }
+
+  wrap.appendChild(svg);
+  return wrap;
+}
+
+// ================================================================
+// PWA INSTALL PROMPT (Bug #10 fix)
+// ================================================================
+
+let _deferredInstallPrompt = null;
+
+function initInstallPrompt() {
+  window.addEventListener('beforeinstallprompt', e => {
+    // Prevent Chrome's mini-infobar on mobile
+    e.preventDefault();
+    _deferredInstallPrompt = e;
+
+    // Show a non-intrusive install banner after a short delay
+    // only if the user hasn't dismissed it before
+    if (!localStorage.getItem('pg_install_dismissed')) {
+      setTimeout(showInstallBanner, 3000);
+    }
+  });
+
+  window.addEventListener('appinstalled', () => {
+    _deferredInstallPrompt = null;
+    hideInstallBanner();
+    showToast('Province Games installed on your home screen! 🏆', 'success');
+  });
+}
+
+function showInstallBanner() {
+  if (document.getElementById('install-banner')) return;
+  const banner = document.createElement('div');
+  banner.id = 'install-banner';
+  banner.style.cssText = [
+    'position:fixed', 'bottom:max(80px,calc(env(safe-area-inset-bottom)+80px))',
+    'left:50%', 'transform:translateX(-50%)',
+    'background:#1B2432', 'border:1.5px solid #6994B8',
+    'border-radius:12px', 'padding:12px 16px',
+    'display:flex', 'align-items:center', 'gap:12px',
+    'z-index:800', 'box-shadow:0 4px 24px rgba(0,0,0,0.5)',
+    'max-width:340px', 'width:calc(100% - 32px)',
+    'animation:toast-in 0.25s ease'
+  ].join(';');
+  banner.innerHTML = `
+    <span style="font-size:24px">📲</span>
+    <div style="flex:1">
+      <div style="font-weight:700;font-size:14px;color:#fff">Add to Home Screen</div>
+      <div style="font-size:12px;color:#B0B0B0;margin-top:2px">Works fully offline on iPad</div>
+    </div>
+    <button id="btn-install-now" style="
+      background:#6994B8;color:#fff;border:none;border-radius:8px;
+      padding:8px 14px;font-weight:700;font-size:13px;cursor:pointer;
+      min-height:44px;min-width:64px;font-family:inherit">Install</button>
+    <button id="btn-install-dismiss" style="
+      background:none;border:none;color:#B0B0B0;cursor:pointer;
+      padding:8px;min-height:44px;min-width:44px;font-size:18px" 
+      aria-label="Dismiss">✕</button>`;
+  document.body.appendChild(banner);
+
+  document.getElementById('btn-install-now').addEventListener('click', async () => {
+    if (!_deferredInstallPrompt) return;
+    _deferredInstallPrompt.prompt();
+    const { outcome } = await _deferredInstallPrompt.userChoice;
+    if (outcome === 'accepted') {
+      _deferredInstallPrompt = null;
+    }
+    hideInstallBanner();
+  });
+
+  document.getElementById('btn-install-dismiss').addEventListener('click', () => {
+    localStorage.setItem('pg_install_dismissed', '1');
+    hideInstallBanner();
+  });
+}
+
+function hideInstallBanner() {
+  document.getElementById('install-banner')?.remove();
 }
 
 // Make sanitize available to other modules
