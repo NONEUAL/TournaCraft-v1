@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#121420" />
+  <title>Province Games – Live Bracket</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="css/style.css" />
+  <style>
+    /* Viewer-specific overrides */
+    .viewer-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(105, 148, 184, 0.15);
+      border: 1px solid rgba(105, 148, 184, 0.35);
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 12px;
+      color: #6994B8;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .live-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #6994B8;
+      animation: pulse-live 1.5s ease-in-out infinite;
+    }
+    @keyframes pulse-live {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.8); }
+    }
+    .code-entry-screen {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: calc(100vh - 80px);
+      padding: 24px;
+      text-align: center;
+    }
+    .code-entry-screen .entry-logo {
+      font-size: 64px;
+      margin-bottom: 16px;
+    }
+    .code-entry-screen h1 { font-size: 28px; margin-bottom: 8px; }
+    .code-entry-screen p { color: #B0B0B0; margin-bottom: 32px; max-width: 340px; }
+    .code-input-wrap {
+      display: flex;
+      gap: 10px;
+      width: 100%;
+      max-width: 380px;
+    }
+    .code-input-wrap input {
+      flex: 1;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      font-size: 20px;
+      text-align: center;
+      font-weight: 700;
+    }
+    .viewer-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      height: 60px;
+      background: var(--c-header);
+      border-bottom: 1px solid var(--c-border);
+    }
+    .viewer-tournament-info {
+      display: flex;
+      flex-direction: column;
+    }
+    .viewer-tournament-info .t-name { font-weight: 700; font-size: 15px; }
+    .viewer-tournament-info .t-meta { font-size: 12px; color: #B0B0B0; margin-top: 1px; }
+    .refresh-btn {
+      min-width: 44px;
+      min-height: 44px;
+    }
+    .auto-refresh-info {
+      text-align: center;
+      padding: 8px;
+      font-size: 12px;
+      color: #B0B0B0;
+      background: var(--c-card);
+      border-bottom: 1px solid var(--c-border);
+    }
+    .read-only-notice {
+      text-align: center;
+      padding: 10px 16px;
+      background: rgba(105, 148, 184, 0.08);
+      border-bottom: 1px solid rgba(105, 148, 184, 0.2);
+      font-size: 13px;
+      color: #B0B0B0;
+    }
+    #view-bracket-viewer .phase-tabs { position: sticky; top: 0; z-index: 10; }
+  </style>
+</head>
+<body>
+
+  <div id="connection-status" class="connection-badge offline" aria-live="polite">
+    <span class="status-dot"></span>
+    <span class="status-text">Offline</span>
+  </div>
+
+  <!-- Code Entry Screen -->
+  <div id="code-entry-screen">
+    <header class="app-header">
+      <div class="header-left">
+        <div class="logo">
+          <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M14 2L26 8V20L14 26L2 20V8L14 2Z" stroke="#6994B8" stroke-width="2" fill="none"/>
+            <path d="M14 7L20 10.5V17.5L14 21L8 17.5V10.5L14 7Z" fill="#6994B8" opacity="0.4"/>
+            <circle cx="14" cy="14" r="3" fill="#6994B8"/>
+          </svg>
+          <span class="logo-text">Province Games</span>
+        </div>
+      </div>
+      <div>
+        <span class="viewer-badge">
+          <span class="live-dot"></span>
+          Live Viewer
+        </span>
+      </div>
+    </header>
+
+    <div class="code-entry-screen">
+      <div class="entry-logo">🏆</div>
+      <h1>View a Tournament</h1>
+      <p>Enter a share code to follow a live bracket. Ask the tournament organizer for the 6-character code.</p>
+      <div class="code-input-wrap">
+        <input type="text" id="share-code-input" placeholder="ABC123" maxlength="8"
+          autocomplete="off" autocapitalize="characters" spellcheck="false"
+          aria-label="Tournament share code" />
+        <button class="btn btn-primary" id="btn-load-tournament" style="min-height:44px;white-space:nowrap;">
+          View Bracket
+        </button>
+      </div>
+      <p style="margin-top:16px;font-size:13px;" id="code-error-msg"></p>
+      <div style="margin-top:40px;padding-top:32px;border-top:1px solid var(--c-border);width:100%;max-width:380px;">
+        <p style="font-size:13px;color:#B0B0B0;margin-bottom:12px;">Are you an organizer?</p>
+        <a href="index.html" class="btn btn-secondary" style="display:inline-flex;min-height:44px;">
+          Open Tournament Maker
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loaded Bracket View -->
+  <div id="viewer-bracket-screen" hidden>
+    <header class="viewer-topbar">
+      <div class="viewer-tournament-info">
+        <span class="t-name" id="viewer-t-name">Tournament</span>
+        <span class="t-meta" id="viewer-t-meta">Loading…</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span class="viewer-badge" id="viewer-live-badge">
+          <span class="live-dot"></span>
+          Live
+        </span>
+        <button class="btn btn-icon refresh-btn" id="btn-refresh" aria-label="Refresh bracket">
+          <svg width="18" height="18" fill="none" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <button class="btn btn-icon" id="btn-exit-viewer" aria-label="Exit viewer">
+          <svg width="18" height="18" fill="none" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="read-only-notice">
+      👁 Read-only view — refreshes automatically every 30 seconds when online
+    </div>
+    <div class="auto-refresh-info" id="last-updated-info">Last updated: just now</div>
+
+    <!-- Phase tabs (same component used in admin) -->
+    <div class="phase-tabs" id="viewer-phase-tabs" role="tablist"></div>
+
+    <!-- Bracket render area -->
+    <div class="bracket-area viewer-bracket-area">
+      <div id="viewer-bracket-content" class="bracket-content read-only">
+        <!-- Rendered by JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast notifications -->
+  <div id="toast-container" aria-live="polite" aria-atomic="false"></div>
+
+  <!-- Scripts -->
+  <script src="js/storage.js"></script>
+  <script src="js/bracket/doubleElim.js"></script>
+  <script src="js/bracket/roundRobin.js"></script>
+  <script src="js/games/mobileLegends.js"></script>
+  <script>
+    // ================================================================
+    // VIEW.HTML – PUBLIC TOURNAMENT VIEWER
+    // ================================================================
+
+    const REFRESH_INTERVAL_MS = 30_000;
+    let currentTournament = null;
+    let refreshTimer = null;
+    let lastUpdated = null;
+
+    // ── Grab URL param if share code was in the link ─────────────────
+    document.addEventListener('DOMContentLoaded', () => {
+      initConnectionStatus();
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get('code');
+      if (code) {
+        document.getElementById('share-code-input').value = code.toUpperCase();
+        loadTournamentByCode(code.toUpperCase());
+      }
+
+      document.getElementById('btn-load-tournament').addEventListener('click', () => {
+        const code = document.getElementById('share-code-input').value.trim().toUpperCase();
+        loadTournamentByCode(code);
+      });
+
+      document.getElementById('share-code-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') document.getElementById('btn-load-tournament').click();
+      });
+
+      document.getElementById('btn-refresh').addEventListener('click', () => {
+        if (currentTournament) refreshTournament();
+      });
+
+      document.getElementById('btn-exit-viewer').addEventListener('click', () => {
+        clearInterval(refreshTimer);
+        currentTournament = null;
+        document.getElementById('viewer-bracket-screen').hidden = true;
+        document.getElementById('code-entry-screen').hidden = false;
+      });
+    });
+
+    async function loadTournamentByCode(code) {
+      const errMsg = document.getElementById('code-error-msg');
+      errMsg.textContent = '';
+      if (!code || code.length < 4) {
+        errMsg.textContent = '⚠️ Please enter a valid share code.';
+        errMsg.style.color = '#e07070';
+        return;
+      }
+
+      try {
+        // Try storage (offline-first)
+        const tournament = await Storage.getTournamentByCode(code);
+        if (!tournament) {
+          errMsg.textContent = '❌ Tournament not found. Check the code and try again.';
+          errMsg.style.color = '#e07070';
+          return;
+        }
+        currentTournament = tournament;
+        showViewerBracket(tournament);
+      } catch (err) {
+        errMsg.textContent = '⚠️ Unable to load bracket. Check your connection and try again.';
+        errMsg.style.color = '#e07070';
+        console.error('[Viewer] Load error:', err);
+      }
+    }
+
+    function showViewerBracket(tournament) {
+      document.getElementById('code-entry-screen').hidden = true;
+      document.getElementById('viewer-bracket-screen').hidden = false;
+      document.getElementById('viewer-t-name').textContent = tournament.name;
+      document.getElementById('viewer-t-meta').textContent =
+        `${GameConfigs[tournament.game]?.label || tournament.game} · ${FormatLabels[tournament.format] || tournament.format}`;
+      lastUpdated = new Date();
+      updateLastUpdatedLabel();
+
+      // Render bracket (read-only mode: no click handlers for score entry)
+      renderViewerBracket(tournament);
+
+      // Start auto-refresh
+      clearInterval(refreshTimer);
+      refreshTimer = setInterval(refreshTournament, REFRESH_INTERVAL_MS);
+    }
+
+    async function refreshTournament() {
+      if (!currentTournament) return;
+      try {
+        const updated = await Storage.getTournamentByCode(currentTournament.shareCode);
+        if (updated) {
+          currentTournament = updated;
+          renderViewerBracket(updated);
+          lastUpdated = new Date();
+          updateLastUpdatedLabel();
+        }
+      } catch (err) {
+        console.warn('[Viewer] Refresh failed silently:', err);
+      }
+    }
+
+    function updateLastUpdatedLabel() {
+      const el = document.getElementById('last-updated-info');
+      if (!lastUpdated) { el.textContent = ''; return; }
+      const secs = Math.round((Date.now() - lastUpdated.getTime()) / 1000);
+      el.textContent = secs < 10 ? 'Last updated: just now' : `Last updated: ${secs}s ago`;
+      setTimeout(updateLastUpdatedLabel, 10_000);
+    }
+
+    function renderViewerBracket(tournament) {
+      // Reuse the same rendering helpers from app.js style, but read-only
+      const tabs = document.getElementById('viewer-phase-tabs');
+      const content = document.getElementById('viewer-bracket-content');
+
+      if (tournament.format === 'groups_double_elim') {
+        tabs.innerHTML = buildPhaseTabs(['Group Stage', 'Winners Bracket', 'Losers Bracket', 'Grand Finals']);
+        tabs.querySelectorAll('.phase-tab').forEach((tab, i) => {
+          tab.addEventListener('click', () => {
+            tabs.querySelectorAll('.phase-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            renderPhaseContent(tournament, i, content, true);
+          });
+        });
+        renderPhaseContent(tournament, 0, content, true);
+      } else if (tournament.format === 'double_elimination') {
+        tabs.innerHTML = buildPhaseTabs(['Winners Bracket', 'Losers Bracket', 'Grand Finals']);
+        tabs.querySelectorAll('.phase-tab').forEach((tab, i) => {
+          tab.addEventListener('click', () => {
+            tabs.querySelectorAll('.phase-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            renderPhaseContent(tournament, i + 1, content, true);
+          });
+        });
+        renderPhaseContent(tournament, 1, content, true);
+      } else {
+        tabs.innerHTML = '';
+        renderPhaseContent(tournament, 0, content, true);
+      }
+    }
+
+    // These helper functions are shared with app.js; in production,
+    // extract to a shared ui/bracketRenderer.js module.
+    function buildPhaseTabs(labels) {
+      return labels.map((label, i) =>
+        `<button class="phase-tab${i === 0 ? ' active' : ''}" role="tab" data-index="${i}">${label}</button>`
+      ).join('');
+    }
+
+    // renderPhaseContent is defined in app.js and shared via globals.
+    // For the viewer, we defer to the same function with readOnly=true.
+    // This avoids duplication and ensures visual consistency.
+    function renderPhaseContent(tournament, phaseIndex, container, readOnly) {
+      if (typeof window.renderTournamentPhase === 'function') {
+        window.renderTournamentPhase(tournament, phaseIndex, container, readOnly);
+      } else {
+        container.innerHTML = `<p style="text-align:center;padding:48px;color:#B0B0B0">Loading bracket engine…</p>`;
+      }
+    }
+
+    // ── Game & format label maps ─────────────────────────────────────
+    const GameConfigs = {
+      mobile_legends: { label: 'Mobile Legends' },
+      cod_mobile:     { label: 'COD Mobile' },
+      volleyball:     { label: 'Volleyball' },
+      basketball:     { label: 'Basketball' },
+      tekken:         { label: 'Tekken' }
+    };
+    const FormatLabels = {
+      groups_double_elim: 'Groups → Double Elimination',
+      double_elimination: 'Double Elimination',
+      single_elimination: 'Single Elimination',
+      round_robin: 'Round Robin',
+      swiss: 'Swiss Stage'
+    };
+
+    // ── Connection status (duplicated from app.js for standalone use) ─
+    function initConnectionStatus() {
+      const badge = document.getElementById('connection-status');
+      function update() {
+        const online = navigator.onLine;
+        badge.className = `connection-badge ${online ? 'online' : 'offline'}`;
+        badge.querySelector('.status-text').textContent = online ? 'Online' : 'Offline';
+      }
+      window.addEventListener('online', update);
+      window.addEventListener('offline', update);
+      update();
+    }
+  </script>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(() => {});
+      });
+    }
+  </script>
+</body>
+</html>

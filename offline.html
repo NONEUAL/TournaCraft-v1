@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#121420" />
+  <title>Province Games – Offline</title>
+  <style>
+    :root {
+      --c-bg: #121420; --c-card: #1B2432; --c-border: #403F4C;
+      --c-accent: #6994B8; --c-text: #FFFFFF; --c-muted: #B0B0B0;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--c-bg); color: var(--c-text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; padding: 24px; text-align: center;
+    }
+    .icon { font-size: 64px; margin-bottom: 20px; }
+    h1 { font-size: 26px; font-weight: 700; margin-bottom: 10px; }
+    p  { color: var(--c-muted); max-width: 340px; line-height: 1.6; margin-bottom: 24px; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 0 24px; min-height: 48px; border-radius: 8px;
+      background: var(--c-accent); color: #fff; font-weight: 600;
+      font-size: 15px; border: none; cursor: pointer; font-family: inherit;
+      text-decoration: none;
+    }
+    .card {
+      background: var(--c-card); border: 1.5px solid var(--c-border);
+      border-radius: 12px; padding: 20px; max-width: 360px;
+      margin-top: 32px; text-align: left;
+    }
+    .card h2 { font-size: 15px; margin-bottom: 10px; }
+    .card li { color: var(--c-muted); font-size: 13px; margin-bottom: 6px; list-style: none; padding-left: 16px; position: relative; }
+    .card li::before { content: '→'; position: absolute; left: 0; color: var(--c-accent); }
+  </style>
+</head>
+<body>
+  <div class="icon">📡</div>
+  <h1>You're Offline</h1>
+  <p>Province Games needs a connection the first time you load it. Once loaded, everything works offline!</p>
+  <a href="/" class="btn">Try Again</a>
+  <div class="card">
+    <h2>What works offline:</h2>
+    <ul>
+      <li>View and manage all your saved tournaments</li>
+      <li>Enter match scores and advance brackets</li>
+      <li>Create new tournaments</li>
+      <li>All changes sync automatically when back online</li>
+    </ul>
+  </div>
+</body>
+</html>

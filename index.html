@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#121420" />
+  <title>Province Games – Tournament Maker</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-512.png" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <!-- Connection status indicator -->
+  <div id="connection-status" class="connection-badge offline" aria-live="polite">
+    <span class="status-dot"></span>
+    <span class="status-text">Offline</span>
+  </div>
+
+  <!-- Top navigation -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="logo">
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M14 2L26 8V20L14 26L2 20V8L14 2Z" stroke="#6994B8" stroke-width="2" fill="none"/>
+          <path d="M14 7L20 10.5V17.5L14 21L8 17.5V10.5L14 7Z" fill="#6994B8" opacity="0.4"/>
+          <circle cx="14" cy="14" r="3" fill="#6994B8"/>
+        </svg>
+        <span class="logo-text">Province Games</span>
+      </div>
+    </div>
+    <nav class="header-nav">
+      <button class="nav-btn active" data-view="dashboard" aria-label="Dashboard">
+        <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1" stroke="currentColor" stroke-width="2"/><rect x="14" y="3" width="7" height="7" rx="1" stroke="currentColor" stroke-width="2"/><rect x="3" y="14" width="7" height="7" rx="1" stroke="currentColor" stroke-width="2"/><rect x="14" y="14" width="7" height="7" rx="1" stroke="currentColor" stroke-width="2"/></svg>
+        <span>Tournaments</span>
+      </button>
+      <button class="nav-btn" data-view="create" aria-label="Create tournament">
+        <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><line x1="12" y1="8" x2="12" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="8" y1="12" x2="16" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span>New</span>
+      </button>
+    </nav>
+  </header>
+
+  <!-- Main content area -->
+  <main class="app-main">
+
+    <!-- ============================================================
+         DASHBOARD VIEW
+    ============================================================ -->
+    <section id="view-dashboard" class="view active">
+      <div class="section-header">
+        <h1>Your Tournaments</h1>
+        <button class="btn btn-primary" id="btn-open-create">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="5" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          Create Tournament
+        </button>
+      </div>
+
+      <div id="tournament-list" class="tournament-grid">
+        <!-- Populated by JS -->
+      </div>
+
+      <div id="empty-state" class="empty-state hidden">
+        <div class="empty-icon">🏆</div>
+        <h2>No tournaments yet</h2>
+        <p>Create your first tournament to get started. Works completely offline!</p>
+        <button class="btn btn-primary btn-lg" id="btn-empty-create">Create Tournament</button>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         CREATE / EDIT TOURNAMENT VIEW
+    ============================================================ -->
+    <section id="view-create" class="view">
+      <div class="section-header">
+        <button class="btn btn-ghost" id="btn-back-dashboard">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Back
+        </button>
+        <h1>New Tournament</h1>
+      </div>
+
+      <form id="tournament-form" class="form-card" novalidate>
+        <!-- Step 1: Basic Info -->
+        <div class="form-step active" id="step-1">
+          <h2 class="step-title"><span class="step-num">1</span> Tournament Details</h2>
+
+          <div class="form-group">
+            <label for="t-name">Tournament Name</label>
+            <input type="text" id="t-name" name="name" placeholder="e.g. MLBB Provincial Cup 2024"
+              maxlength="80" required autocomplete="off" />
+            <span class="field-error"></span>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="t-game">Game</label>
+              <select id="t-game" name="game">
+                <option value="mobile_legends">Mobile Legends</option>
+                <option value="cod_mobile">COD Mobile</option>
+                <option value="volleyball">Volleyball</option>
+                <option value="basketball">Basketball</option>
+                <option value="tekken">Tekken</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="t-format">Format</label>
+              <select id="t-format" name="format">
+                <option value="groups_double_elim">Group Stage → Double Elimination</option>
+                <option value="double_elimination">Double Elimination</option>
+                <option value="single_elimination">Single Elimination</option>
+                <option value="round_robin">Round Robin</option>
+                <option value="swiss">Swiss Stage</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="t-date">Start Date</label>
+              <input type="date" id="t-date" name="date" />
+            </div>
+            <div class="form-group">
+              <label for="t-venue">Venue (optional)</label>
+              <input type="text" id="t-venue" name="venue" placeholder="e.g. City Coliseum" maxlength="60" />
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="btn btn-primary" id="btn-step1-next">Next: Add Teams →</button>
+          </div>
+        </div>
+
+        <!-- Step 2: Team Entry -->
+        <div class="form-step" id="step-2">
+          <h2 class="step-title"><span class="step-num">2</span> Add Teams</h2>
+
+          <div class="teams-toolbar">
+            <span id="team-count-label" class="team-count">0 teams added</span>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-load-demo">Load Demo Data</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-clear-teams">Clear All</button>
+          </div>
+
+          <div id="teams-grid" class="teams-grid">
+            <!-- Team inputs generated by JS -->
+          </div>
+
+          <button type="button" class="btn btn-secondary btn-full" id="btn-add-team">
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="5" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            Add Team
+          </button>
+
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" id="btn-step2-back">← Back</button>
+            <button type="button" class="btn btn-primary" id="btn-step2-next">Next: Review →</button>
+          </div>
+        </div>
+
+        <!-- Step 3: Review & Generate -->
+        <div class="form-step" id="step-3">
+          <h2 class="step-title"><span class="step-num">3</span> Review & Generate</h2>
+
+          <div id="review-summary" class="review-card">
+            <!-- Populated by JS -->
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="btn btn-ghost" id="btn-step3-back">← Back</button>
+            <button type="submit" class="btn btn-primary btn-lg" id="btn-generate">
+              🏆 Generate Bracket
+            </button>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <!-- ============================================================
+         BRACKET VIEW (active tournament)
+    ============================================================ -->
+    <section id="view-bracket" class="view">
+      <div class="bracket-topbar">
+        <button class="btn btn-ghost" id="btn-back-from-bracket">
+          <svg width="16" height="16" fill="none" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          All Tournaments
+        </button>
+        <div class="bracket-title-wrap">
+          <h1 id="bracket-tournament-name" class="bracket-title">Tournament</h1>
+          <span id="bracket-status-badge" class="status-badge status-active">Active</span>
+        </div>
+        <div class="bracket-actions">
+          <button class="btn btn-secondary btn-sm" id="btn-share">
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="16 6 12 2 8 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="2" x2="12" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            Share
+          </button>
+        </div>
+      </div>
+
+      <!-- Bracket phase tabs -->
+      <div class="phase-tabs" id="phase-tabs" role="tablist">
+        <!-- Tabs generated by JS based on format -->
+      </div>
+
+      <!-- Bracket canvas area -->
+      <div class="bracket-area" id="bracket-area">
+        <div id="bracket-content" class="bracket-content">
+          <!-- Rendered by bracket engine -->
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============================================================
+       MATCH SCORE MODAL
+  ============================================================ -->
+  <div id="modal-score" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-score-title" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-sheet">
+      <div class="modal-header">
+        <h2 id="modal-score-title">Enter Match Result</h2>
+        <button class="btn btn-icon" id="modal-close" aria-label="Close">
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal-body" id="modal-score-body">
+        <div class="match-teams">
+          <div class="match-team-entry" id="entry-team1">
+            <div class="team-name-display" id="modal-team1-name">Team 1</div>
+            <div class="score-controls">
+              <button class="score-btn score-dec" aria-label="Decrease score">−</button>
+              <input type="number" class="score-input" id="modal-score1" value="0" min="0" max="99" />
+              <button class="score-btn score-inc" aria-label="Increase score">+</button>
+            </div>
+          </div>
+          <div class="vs-divider">VS</div>
+          <div class="match-team-entry" id="entry-team2">
+            <div class="team-name-display" id="modal-team2-name">Team 2</div>
+            <div class="score-controls">
+              <button class="score-btn score-dec" aria-label="Decrease score">−</button>
+              <input type="number" class="score-input" id="modal-score2" value="0" min="0" max="99" />
+              <button class="score-btn score-inc" aria-label="Increase score">+</button>
+            </div>
+          </div>
+        </div>
+        <p class="best-of-label" id="modal-best-of">Best of 3</p>
+        <div id="game-series-tracker" class="game-series">
+          <!-- Game-by-game tracker filled by JS for BO3/BO5 -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" id="modal-cancel">Cancel</button>
+        <button class="btn btn-primary" id="modal-confirm">Confirm Result</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       SHARE MODAL
+  ============================================================ -->
+  <div id="modal-share" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-share-title" hidden>
+    <div class="modal-backdrop"></div>
+    <div class="modal-sheet modal-sheet--sm">
+      <div class="modal-header">
+        <h2 id="modal-share-title">Share Tournament</h2>
+        <button class="btn btn-icon" id="share-modal-close" aria-label="Close">
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p class="share-instructions">Share this code or link with viewers. They can follow the bracket live (read-only).</p>
+        <div class="share-code-display">
+          <span id="share-code-value" class="share-code">------</span>
+          <button class="btn btn-sm btn-secondary" id="btn-copy-code">Copy Code</button>
+        </div>
+        <div class="share-url-row">
+          <input type="text" class="share-url-input" id="share-url-display" readonly />
+          <button class="btn btn-sm btn-secondary" id="btn-copy-url">Copy Link</button>
+        </div>
+        <p class="share-note">⚡ Works offline — share code lets viewers load the latest synced data</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast notifications -->
+  <div id="toast-container" aria-live="polite" aria-atomic="false"></div>
+
+  <!-- Scripts -->
+  <script src="js/storage.js"></script>
+  <script src="js/bracket/doubleElim.js"></script>
+  <script src="js/bracket/roundRobin.js"></script>
+  <script src="js/games/mobileLegends.js"></script>
+  <script src="js/app.js"></script>
+
+  <script>
+    // Register service worker
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js')
+          .then(reg => console.log('[SW] Registered', reg.scope))
+          .catch(err => console.warn('[SW] Registration failed:', err));
+      });
+    }
+  </script>
+</body>
+</html>
