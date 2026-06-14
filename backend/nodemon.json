@@ -1,0 +1,8 @@
+{
+  "watch": ["server.js", "api/", "database/", "realtime/"],
+  "ignore": ["node_modules/", ".env", "*.backup"],
+  "env": {
+    "NODE_ENV": "development"
+  },
+  "ext": "js,json"
+}
