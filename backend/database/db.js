@@ -1,62 +1,54 @@
-/**
- * backend/database/db.js
- *
- * PostgreSQL connection pool using the `pg` package.
- * All queries go through the pool — never create ad-hoc clients.
- *
- * Usage:
- *   const { query, getClient } = require('./database/db');
- *   const { rows } = await query('SELECT * FROM tournaments WHERE id = $1', [id]);
- */
-
 'use strict';
 
 const { Pool } = require('pg');
+console.log('[DB] Loading database module...');
 
-let pool = null;
+// Database connection - using explicit parameters
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL || null,
+  host:     process.env.DB_HOST     || 'localhost',
+  port:     parseInt(process.env.DB_PORT || '5432'),
+  user:     process.env.DB_USER     || 'postgres',
+  password: process.env.DB_PASSWORD || 'dev123',
+  database: process.env.DB_NAME     || 'province_games',
+  ssl: process.env.NODE_ENV === 'production'
+    ? { rejectUnauthorized: false }
+    : false,
+});
 
-/**
- * Initialise the connection pool and verify connectivity.
- * Call once at startup from server.js.
- */
+console.log('[DB] Pool created with config:', {
+  host: 'localhost',
+  port: 5432,
+  user: 'postgres',
+  password: '***',
+  database: 'province_games'
+});
+
+pool.on('error', (err) => {
+  console.error('[DB] Pool error:', err);
+});
+
 async function initDb() {
-  if (pool) return pool;
-
-  if (!process.env.DATABASE_URL) {
-    throw new Error('DATABASE_URL environment variable is not set.');
+  console.log('[DB] initDb called, testing connection...');
+  let client;
+  try {
+    client = await pool.connect();
+    console.log('[DB] Got client, running test query...');
+    const result = await client.query('SELECT NOW() as current_time');
+    console.log('[DB] Query successful, current time:', result.rows[0].current_time);
+    client.release();
+    console.log('[DB] ✅ Connected to PostgreSQL successfully');
+    return pool;
+  } catch (err) {
+    console.error('[DB] ❌ Connection failed - Full error:', err);
+    console.error('[DB] Error code:', err.code);
+    console.error('[DB] Error message:', err.message);
+    if (client) client.release();
+    throw err;
   }
-
-  pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    // SSL required for Railway/Render/Heroku in production
-    ssl: process.env.NODE_ENV === 'production'
-      ? { rejectUnauthorized: false }
-      : false,
-    max:             10,    // max pool size
-    idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 5_000,
-  });
-
-  // Test the connection
-  const client = await pool.connect();
-  await client.query('SELECT 1');
-  client.release();
-
-  pool.on('error', (err) => {
-    console.error('[DB] Unexpected pool error:', err.message);
-  });
-
-  return pool;
 }
 
-/**
- * Run a parameterised query.
- * @param {string} text    — SQL with $1, $2… placeholders
- * @param {Array}  params  — parameter values
- * @returns {Promise<pg.QueryResult>}
- */
 async function query(text, params) {
-  if (!pool) throw new Error('Database not initialised. Call initDb() first.');
   const start = Date.now();
   try {
     const result = await pool.query(text, params);
@@ -71,21 +63,10 @@ async function query(text, params) {
   }
 }
 
-/**
- * Get a raw client for multi-statement transactions.
- * Caller must call client.release() when done.
- * @returns {Promise<pg.PoolClient>}
- */
 async function getClient() {
-  if (!pool) throw new Error('Database not initialised.');
   return pool.connect();
 }
 
-/**
- * Run multiple queries in a transaction.
- * Automatically rolls back on error.
- * @param {Function} fn — async (client) => result
- */
 async function transaction(fn) {
   const client = await getClient();
   try {
