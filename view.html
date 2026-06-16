@@ -213,7 +213,10 @@
     'use strict';
 
     // ── Constants ────────────────────────────────────────────────
-    const POLL_INTERVAL_MS = 30_000;   // fallback polling when WS not connected
+    const POLL_INTERVAL_MS       = 8_000;   // poll every 8s when WS not connected
+    const POLL_INTERVAL_IDLE_MS  = 30_000;  // slow down if no changes for 2 min
+    let   _lastChangeTime        = Date.now();
+    let   _pollFast              = true;
 
     const GAME_LABELS = {
       mobile_legends: 'Mobile Legends', cod_mobile: 'COD Mobile',
@@ -400,7 +403,16 @@
     // ── Fallback polling ──────────────────────────────────────────
     function startPolling() {
       clearInterval(pollTimer);
-      pollTimer = setInterval(poll, POLL_INTERVAL_MS);
+      schedulePoll();
+    }
+
+    function schedulePoll() {
+      clearInterval(pollTimer);
+      if (!currentTournament) return;
+      // Use faster interval if a change was seen recently (within 2 min)
+      const sinceLast = Date.now() - _lastChangeTime;
+      const interval  = sinceLast < 120_000 ? POLL_INTERVAL_MS : POLL_INTERVAL_IDLE_MS;
+      pollTimer = setInterval(poll, interval);
     }
 
     async function poll() {
@@ -411,10 +423,29 @@
           currentTournament = updated;
           renderCurrentPhase();
           markUpdated();
+          _lastChangeTime = Date.now();
+          // A change was found — switch to fast polling
+          schedulePoll();
         }
       } catch (err) {
         console.warn('[Viewer] Poll failed silently:', err);
       }
+    }
+
+    // Poll immediately when tab becomes visible again (user switches back)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && currentTournament) {
+        poll();
+      }
+    });
+
+    // Service worker notifies us when a background sync completes
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', event => {
+        if (event.data?.type === 'SW_SYNC_REQUESTED' && currentTournament) {
+          poll();
+        }
+      });
     }
 
     // ── Exit viewer ───────────────────────────────────────────────
