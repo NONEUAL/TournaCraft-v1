@@ -255,21 +255,36 @@ function serverAdvanceLB(t, match) {
   const { round, matchNum } = match;
   const lbRounds  = t.losersBracket.rounds;
   const lastRound = lbRounds[lbRounds.length - 1].round;
+
   if (round === lastRound) {
     t.grandFinals.series1.team2Id = match.winnerId;
     return;
   }
+
   const nextRound = lbRounds.find(r => r.round === round + 1);
   if (!nextRound) return;
-  const isDropIn = round % 2 === 1;
-  if (isDropIn) {
-    if (nextRound.matches[matchNum - 1]) {
-      nextRound.matches[matchNum - 1].team1Id = match.winnerId;
-    }
+
+  const isCurrentDropIn = round % 2 === 1;
+  const isNextDropIn    = (round + 1) % 2 === 1;
+  const currentRound    = lbRounds.find(r => r.round === round);
+
+  if (isCurrentDropIn) {
+    // Drop-in winner waits as team1Id for WB loser (team2Id)
+    const nextMatch = nextRound.matches[matchNum - 1];
+    if (nextMatch) nextMatch.team1Id = match.winnerId;
   } else {
-    const idx  = Math.floor((matchNum - 1) / 2);
-    const slot = (matchNum - 1) % 2 === 0 ? 'team1Id' : 'team2Id';
-    if (nextRound.matches[idx]) nextRound.matches[idx][slot] = match.winnerId;
+    if (isNextDropIn) {
+      // Survivor into drop-in: use floor if next round has fewer matches
+      const sameCount = nextRound.matches.length === (currentRound?.matches.length || 0);
+      const idx = sameCount ? matchNum - 1 : Math.floor((matchNum - 1) / 2);
+      const nextMatch = nextRound.matches[idx];
+      if (nextMatch) nextMatch.team1Id = match.winnerId;
+    } else {
+      // Survivor into survivor: pair up
+      const idx  = Math.floor((matchNum - 1) / 2);
+      const slot = (matchNum - 1) % 2 === 0 ? 'team1Id' : 'team2Id';
+      if (nextRound.matches[idx]) nextRound.matches[idx][slot] = match.winnerId;
+    }
   }
 }
 
