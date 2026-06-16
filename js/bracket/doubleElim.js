@@ -333,28 +333,49 @@ const DoubleElimBracket = (() => {
     const { round, matchNum } = completedMatch;
     const lbRounds = tournament.losersBracket.rounds;
 
+    // ML-specific structure:
+    //   LB R1 = group 3rd places only (seeded at creation, never receives WB losers)
+    //   LB R2 = first drop-in: WB R1 losers (team2) vs LB R1 winners (team1)
+    //   LB R3 = second drop-in: WB R2 losers (team2) vs LB R2 winners (team1)
+    //   LB R5 = third drop-in: WB R3 losers (team2) vs LB R4 winner (team1)
+    //
+    // General rule: WB Round R loser -> LB round (2*R) if odd, else (2*R)+1
+    // Simplified: find first ODD LB round >= 2*R
+    //
+    //   WB R1 losers -> first odd >= 2*1=2 -> LB R3? NO.
+    //   Actually ML mapping is explicit:
+    //   WB R1 (4 losers) -> LB R2 (2 matches, 2 losers each as team2)
+    //   WB R2 (2 losers) -> LB R3 (2 matches, 1 loser each as team2)
+    //   WB R3 (1 loser)  -> LB R5 (1 match, loser as team2)
+    //
+    // Formula: WB Round R loser -> LB round (R*2) when that round exists,
+    // otherwise LB round (R*2 + 1). For ML:
+    //   R=1: LB R2 (even, drop-in in ML since LB R1 is already group 3rds)
+    //   R=2: LB R3 (odd, standard drop-in)
+    //   R=3: LB R5 (odd, skips R4 survivor)
+
+    let targetLBRound;
     if (round === 1) {
-      // WB R1: pairs of WB matches collapse into single LB matches
-      // WB matches 1&2 → LB R1 match 1, matches 3&4 → LB R1 match 2, etc.
-      const lbR1      = lbRounds.find(r => r.round === 1);
-      if (!lbR1) return;
+      // WB R1 losers -> LB R2 (NOT LB R1 which is reserved for group 3rds)
+      // 4 WB R1 losers pair into 2 LB R2 matches as team2
+      // Pair: WB matches (1,2)->LB match 1, (3,4)->LB match 2
+      targetLBRound = lbRounds.find(r => r.round === 2);
+      if (!targetLBRound) return;
       const lbMatchIdx = Math.floor((matchNum - 1) / 2);
-      // Within each pair: first WB match loser → team2, second → team1
-      // (intentional cross to keep top seeds separated longer)
-      const slot = (matchNum - 1) % 2 === 0 ? 'team2Id' : 'team1Id';
-      const lbMatch = lbR1.matches[lbMatchIdx];
-      if (lbMatch) lbMatch[slot] = completedMatch.loserId;
+      const lbMatch    = targetLBRound.matches[lbMatchIdx];
+      if (lbMatch) lbMatch.team2Id = completedMatch.loserId;
 
     } else {
-      // WB Round R (R≥2): loser drops into LB drop-in round = 2*(R-1)
-      const lbDropRound = 2 * (round - 1);
-      const lbRound = lbRounds.find(r => r.round === lbDropRound);
-      if (!lbRound) return;
+      // WB Round R (R>=2): find first odd LB round at or after 2*(R-1)+1
+      // WB R2 -> target = 2*(2-1)+1 = 3 -> LB R3
+      // WB R3 -> target = 2*(3-1)+1 = 5 -> LB R5
+      const targetRoundNum = 2 * (round - 1) + 1;
+      targetLBRound = lbRounds.find(r => r.round === targetRoundNum)
+                   || lbRounds.find(r => r.round > targetRoundNum && r.round % 2 === 1);
+      if (!targetLBRound) return;
 
-      // Drop-in rounds receive WB losers as team2 (team1 is LB survivor)
-      // Direct 1-to-1 mapping: WB match N loser → LB match N team2
       const lbMatchIdx = matchNum - 1;
-      const lbMatch = lbRound.matches[lbMatchIdx];
+      const lbMatch    = targetLBRound.matches[lbMatchIdx];
       if (lbMatch) lbMatch.team2Id = completedMatch.loserId;
     }
   }
@@ -372,31 +393,39 @@ const DoubleElimBracket = (() => {
    */
   function advanceInLosers(tournament, completedMatch) {
     const { round, matchNum } = completedMatch;
-    const lbRounds  = tournament.losersBracket.rounds;
-    const lastRound = lbRounds[lbRounds.length - 1].round;
+    const lbRounds        = tournament.losersBracket.rounds;
+    const lastRound       = lbRounds[lbRounds.length - 1].round;
 
-    // LB Final winner → Grand Finals slot 2
+    // LB Final winner -> Grand Finals slot 2
     if (round === lastRound) {
       tournament.grandFinals.series1.team2Id = completedMatch.winnerId;
       return;
     }
 
-    const nextRoundObj = lbRounds.find(r => r.round === round + 1);
+    const currentRoundObj   = lbRounds.find(r => r.round === round);
+    const nextRoundObj      = lbRounds.find(r => r.round === round + 1);
     if (!nextRoundObj) return;
 
-    const isDropInRound = round % 2 === 1; // Odd = drop-in, even = survivor
+    const currentMatchCount = currentRoundObj?.matches.length || 1;
+    const nextMatchCount    = nextRoundObj.matches.length;
 
-    if (isDropInRound) {
-      // Current round is drop-in: each match winner goes 1-to-1 to same slot
-      // in next (survivor) round as team1
+    // Odd rounds  = drop-in  (WB loser arrives as team2, LB survivor waited as team1)
+    // Even rounds = survivor (two LB survivors played each other)
+    const isCurrentDropIn = round % 2 === 1;
+
+    if (isCurrentDropIn) {
+      // Drop-in winner -> next (survivor) round, same index, team1Id
+      // They wait there; dropToLosers will fill team2 from the next WB loser
       const nextMatch = nextRoundObj.matches[matchNum - 1];
       if (nextMatch) nextMatch.team1Id = completedMatch.winnerId;
     } else {
-      // Current round is survivor: pairs collapse, winner goes to next round
-      const nextMatchIdx = Math.floor((matchNum - 1) / 2);
-      const slot         = (matchNum - 1) % 2 === 0 ? 'team1Id' : 'team2Id';
-      const nextMatch    = nextRoundObj.matches[nextMatchIdx];
-      if (nextMatch) nextMatch[slot] = completedMatch.winnerId;
+      // Survivor winner -> next (drop-in) round as team1Id
+      // Use floor pairing if next round has fewer matches, otherwise direct 1:1
+      const idx = nextMatchCount < currentMatchCount
+        ? Math.floor((matchNum - 1) / 2)
+        : matchNum - 1;
+      const nextMatch = nextRoundObj.matches[idx];
+      if (nextMatch) nextMatch.team1Id = completedMatch.winnerId;
     }
   }
 
