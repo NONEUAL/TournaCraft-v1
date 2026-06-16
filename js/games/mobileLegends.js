@@ -220,10 +220,12 @@ const MLTournament = (() => {
   /**
    * Build Losers Bracket for 4 drop-in teams (from group stage 3rd places).
    * Structure:
-   *   LB Round 1 (Drop-in): 2 matches — 4 teams from groups play 4 WB R1 losers
-   *   LB Round 2: 2 matches (survivors)
-   *   LB Round 3: 1 match (SF)
-   *   LB Round 4: LB Final BO3
+   *   LB R1 (drop-in):  2 — group 3rds vs each other
+   *   LB R2 (drop-in):  2 — R1 winners vs WB QF losers
+   *   LB R3 (drop-in):  2 — R2 winners vs WB SF losers
+   *   LB R4 (survivor): 1 — 2 R3 survivors
+   *   LB R5 (drop-in):  1 — R4 winner vs WB Final loser
+   *   LB R6 (LB Final): 1 — BO3
    */
   function buildEmptyLosersBracket(dropInCount, bestOf, bestOfFinal) {
     // LB for 8 teams in WB + 4 group 3rd places:
@@ -233,12 +235,12 @@ const MLTournament = (() => {
 
     // 6 LB rounds for 8-team double elimination
     const roundDefs = [
-      { round: 1, label: 'LB Round 1', matchCount: 2, bestOf: 1 },
-      { round: 2, label: 'LB Round 2', matchCount: 2, bestOf: 1 },
-      { round: 3, label: 'LB Round 3', matchCount: 1, bestOf: 1 },
-      { round: 4, label: 'LB Round 4', matchCount: 2, bestOf: 1 },
+      { round: 1, label: 'LB Round 1',    matchCount: 2, bestOf: 1 },
+      { round: 2, label: 'LB Round 2',    matchCount: 2, bestOf: 1 },
+      { round: 3, label: 'LB Round 3',    matchCount: 2, bestOf: 1 },
+      { round: 4, label: 'LB Round 4',    matchCount: 1, bestOf: 1 },
       { round: 5, label: 'LB Semi-Final', matchCount: 1, bestOf: 1 },
-      { round: 6, label: 'LB Final',   matchCount: 1, bestOf: bestOfFinal },
+      { round: 6, label: 'LB Final',      matchCount: 1, bestOf: bestOfFinal },
     ];
 
     roundDefs.forEach(def => {
